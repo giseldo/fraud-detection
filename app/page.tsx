@@ -7,7 +7,17 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Button } from "@/components/ui/button"
 import { Textarea } from "@/components/ui/textarea"
 import { Label } from "@/components/ui/label"
-import { Upload, FileText, AlertTriangle, CheckCircle, XCircle, AlertCircle } from "lucide-react"
+import {
+  Upload,
+  FileText,
+  AlertTriangle,
+  CheckCircle,
+  XCircle,
+  AlertCircle,
+  TrendingUp,
+  TrendingDown,
+  Minus,
+} from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import { Alert, AlertDescription } from "@/components/ui/alert"
 import { analyzeContract } from "./actions/analyze-contract"
@@ -21,10 +31,20 @@ interface SuspiciousPattern {
   recommendation: string
 }
 
+interface PriceAnalysis {
+  item: string
+  contractPrice: number
+  marketPrice: number | null
+  priceVariation: number
+  riskLevel: "BAIXO" | "MÉDIO" | "ALTO" | "CRÍTICO"
+  analysis: string
+}
+
 interface FraudAnalysis {
   riskScore: number
   riskLevel: "BAIXO" | "MÉDIO" | "ALTO" | "CRÍTICO"
   suspiciousPatterns: SuspiciousPattern[]
+  priceAnalysis: PriceAnalysis[]
   summary: string
   recommendations: string[]
 }
@@ -100,6 +120,19 @@ export default function FraudDetectionApp() {
     }
   }
 
+  const getPriceIcon = (variation: number) => {
+    if (variation > 10) return <TrendingUp className="w-4 h-4 text-red-500" />
+    if (variation < -10) return <TrendingDown className="w-4 h-4 text-blue-500" />
+    return <Minus className="w-4 h-4 text-green-500" />
+  }
+
+  const formatCurrency = (value: number) => {
+    return new Intl.NumberFormat("pt-BR", {
+      style: "currency",
+      currency: "BRL",
+    }).format(value)
+  }
+
   return (
     <div className="min-h-screen bg-gray-50 py-8">
       <div className="max-w-6xl mx-auto px-4">
@@ -108,6 +141,7 @@ export default function FraudDetectionApp() {
           <p className="text-gray-600">
             Analise contratos de licitação para identificar possíveis irregularidades e fraudes
           </p>
+          <p className="text-sm text-blue-600 mt-1">✨ Agora com análise de preços médios do PNCP</p>
         </div>
 
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
@@ -188,6 +222,7 @@ export default function FraudDetectionApp() {
                 <div className="text-center py-12">
                   <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto mb-4"></div>
                   <p className="text-gray-600">Analisando contrato...</p>
+                  <p className="text-sm text-gray-500 mt-2">Consultando preços médios do PNCP...</p>
                 </div>
               )}
 
@@ -204,6 +239,61 @@ export default function FraudDetectionApp() {
                     <AlertTriangle className="h-4 w-4" />
                     <AlertDescription>{analysis.summary}</AlertDescription>
                   </Alert>
+
+                  {/* Price Analysis */}
+                  {analysis.priceAnalysis && analysis.priceAnalysis.length > 0 && (
+                    <div>
+                      <h3 className="font-semibold mb-3 flex items-center gap-2">
+                        <TrendingUp className="w-4 h-4" />
+                        Análise de Preços (PNCP)
+                      </h3>
+                      <div className="space-y-3">
+                        {analysis.priceAnalysis.map((price, index) => (
+                          <Card key={index} className="border-l-4 border-l-blue-400">
+                            <CardContent className="pt-4">
+                              <div className="flex items-start gap-3">
+                                {getPriceIcon(price.priceVariation)}
+                                <div className="flex-1">
+                                  <h4 className="font-medium text-sm">{price.item}</h4>
+
+                                  <div className="grid grid-cols-2 gap-4 mt-2 text-sm">
+                                    <div>
+                                      <span className="text-gray-600">Preço Contrato:</span>
+                                      <div className="font-medium">{formatCurrency(price.contractPrice)}</div>
+                                    </div>
+                                    <div>
+                                      <span className="text-gray-600">Preço Médio PNCP:</span>
+                                      <div className="font-medium">
+                                        {price.marketPrice ? formatCurrency(price.marketPrice) : "N/A"}
+                                      </div>
+                                    </div>
+                                  </div>
+
+                                  <div className="mt-2 flex items-center gap-2">
+                                    <Badge className={getRiskColor(price.riskLevel)} variant="outline">
+                                      {price.riskLevel}
+                                    </Badge>
+                                    {price.marketPrice && (
+                                      <span
+                                        className={`text-sm font-medium ${
+                                          price.priceVariation > 0 ? "text-red-600" : "text-green-600"
+                                        }`}
+                                      >
+                                        {price.priceVariation > 0 ? "+" : ""}
+                                        {price.priceVariation.toFixed(1)}%
+                                      </span>
+                                    )}
+                                  </div>
+
+                                  <p className="text-sm text-gray-600 mt-2">{price.analysis}</p>
+                                </div>
+                              </div>
+                            </CardContent>
+                          </Card>
+                        ))}
+                      </div>
+                    </div>
+                  )}
 
                   {/* Suspicious Patterns */}
                   {analysis.suspiciousPatterns.length > 0 && (
