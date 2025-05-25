@@ -25,7 +25,7 @@ const fraudAnalysisSchema = z.object({
 export async function analyzeContract(contractText: string) {
   try {
     const { object } = await generateObject({
-      model: groq("llama-3.1-70b-versatile"),
+      model: groq("gemma2-9b-it"),
       schema: fraudAnalysisSchema,
       prompt: `
         Analise o seguinte contrato de licitação em busca de possíveis indicadores de fraude ou irregularidades.
