@@ -14,15 +14,24 @@ PREGÃO ELETRÔNICO
 
 OBJETO: Aquisição de equipamentos de informática para modernização do parque tecnológico da Prefeitura Municipal.
 
-1. ESPECIFICAÇÕES TÉCNICAS:
-- Computadores desktop com processador Intel Core i7 de 12ª geração, especificamente modelo 12700K
-- Memória RAM de 32GB DDR4 3200MHz marca Kingston modelo KVR32N22D8/16
-- SSD de 1TB marca Samsung modelo 980 PRO
-- Placa de vídeo NVIDIA RTX 3070 Ti
-- Fonte de alimentação de 750W 80 Plus Gold marca Corsair modelo RM750x
-- Gabinete ATX marca Corsair modelo 4000D
-- Monitor de 27 polegadas 4K marca LG modelo 27UP850-W
-- Teclado e mouse sem fio marca Logitech modelo MX Keys e MX Master 3
+1. ESPECIFICAÇÕES TÉCNICAS E PREÇOS:
+
+Item 1 - Computador desktop com processador Intel Core i7 de 12ª geração, especificamente modelo 12700K
+Memória RAM de 32GB DDR4 3200MHz marca Kingston modelo KVR32N22D8/16
+SSD de 1TB marca Samsung modelo 980 PRO
+Quantidade: 50 unidades
+Valor unitário: R$ 4.500,00
+Valor total: R$ 225.000,00
+
+Item 2 - Monitor de 27 polegadas 4K marca LG modelo 27UP850-W
+Quantidade: 50 unidades  
+Valor unitário: R$ 1.200,00
+Valor total: R$ 60.000,00
+
+Item 3 - Teclado e mouse sem fio marca Logitech modelo MX Keys e MX Master 3
+Quantidade: 50 conjuntos
+Valor unitário: R$ 350,00
+Valor total: R$ 17.500,00
 
 2. CRITÉRIOS DE HABILITAÇÃO:
 - Empresa deve ter sede na cidade há pelo menos 10 anos
@@ -33,7 +42,7 @@ OBJETO: Aquisição de equipamentos de informática para modernização do parqu
 
 3. PRAZO DE ENTREGA: 15 dias corridos após assinatura do contrato
 
-4. VALOR ESTIMADO: R$ 2.500.000,00 para 100 equipamentos completos
+4. VALOR TOTAL ESTIMADO: R$ 302.500,00
 
 5. CRITÉRIO DE JULGAMENTO: Menor preço global
 

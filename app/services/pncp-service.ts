@@ -8,45 +8,42 @@ interface PNCPPriceData {
   lastUpdate: string
 }
 
-interface PNCPSearchResult {
-  content: Array<{
-    codigoItem: string
-    descricaoItem: string
-    valorMedio: number
-    unidadeMedida: string
-    dataReferencia: string
-  }>
-}
-
 export async function searchPNCPPrices(itemDescription: string): Promise<PNCPPriceData | null> {
   try {
-    // Endpoint para consulta de preços médios no PNCP
-    const searchUrl = `https://pncp.gov.br/api/consulta/v1/precos-medios`
+    // Por enquanto, vamos simular dados do PNCP até conseguirmos a integração real
+    // Isso evita erros de rede que podem quebrar a análise
 
-    const response = await fetch(searchUrl, {
-      method: "GET",
-      headers: {
-        Accept: "application/json",
-        "Content-Type": "application/json",
-      },
-      // Adicionar parâmetros de busca baseados na descrição do item
-    })
-
-    if (!response.ok) {
-      console.warn(`PNCP API error: ${response.status}`)
-      return null
+    const mockPrices: Record<string, number> = {
+      computador: 2500,
+      notebook: 3000,
+      impressora: 800,
+      monitor: 600,
+      teclado: 150,
+      mouse: 80,
+      mesa: 400,
+      cadeira: 300,
+      servidor: 15000,
+      switch: 1200,
     }
 
-    const data: PNCPSearchResult = await response.json()
+    // Buscar por palavras-chave na descrição
+    const description = itemDescription.toLowerCase()
+    let foundPrice = null
 
-    if (data.content && data.content.length > 0) {
-      const firstResult = data.content[0]
+    for (const [keyword, price] of Object.entries(mockPrices)) {
+      if (description.includes(keyword)) {
+        foundPrice = price
+        break
+      }
+    }
+
+    if (foundPrice) {
       return {
-        item: firstResult.descricaoItem,
-        averagePrice: firstResult.valorMedio,
-        unit: firstResult.unidadeMedida,
-        dataSource: "PNCP",
-        lastUpdate: firstResult.dataReferencia,
+        item: itemDescription,
+        averagePrice: foundPrice,
+        unit: "unidade",
+        dataSource: "PNCP (simulado)",
+        lastUpdate: new Date().toISOString().split("T")[0],
       }
     }
 
@@ -66,40 +63,39 @@ export async function extractItemsFromContract(contractText: string): Promise<
     unit: string
   }>
 > {
-  // Regex patterns para extrair itens, quantidades e preços
-  const itemPatterns = [
-    /(\d+)\s*[-.]?\s*([^:]+):\s*R?\$?\s*([\d.,]+)/gi,
-    /item\s*(\d+)[:\s]*([^-\n]+)[-\s]*R?\$?\s*([\d.,]+)/gi,
-    /(\d+)\s*unidades?\s*de\s*([^-\n]+)[-\s]*R?\$?\s*([\d.,]+)/gi,
-  ]
+  const items = []
 
-  const items: Array<{
-    description: string
-    quantity: number
-    unitPrice: number
-    totalPrice: number
-    unit: string
-  }> = []
+  try {
+    // Padrões mais simples para extrair itens
+    const lines = contractText.split("\n")
 
-  for (const pattern of itemPatterns) {
-    let match
-    while ((match = pattern.exec(contractText)) !== null) {
-      const quantity = Number.parseInt(match[1]) || 1
-      const description = match[2].trim()
-      const priceStr = match[3].replace(/[.,]/g, (match) => (match === "," ? "." : ""))
-      const price = Number.parseFloat(priceStr)
+    for (const line of lines) {
+      // Buscar por padrões como "R$ 1.000,00" ou "1000 reais"
+      const priceMatch = line.match(/R\$?\s*([\d.,]+)/i)
+      if (priceMatch) {
+        const priceStr = priceMatch[1].replace(/\./g, "").replace(",", ".")
+        const price = Number.parseFloat(priceStr)
 
-      if (description && !isNaN(price)) {
-        items.push({
-          description,
-          quantity,
-          unitPrice: price / quantity,
-          totalPrice: price,
-          unit: "unidade",
-        })
+        if (!isNaN(price) && price > 0) {
+          // Extrair descrição (texto antes do preço)
+          const description = line.substring(0, line.indexOf(priceMatch[0])).trim()
+
+          if (description.length > 5) {
+            items.push({
+              description: description.substring(0, 100), // Limitar tamanho
+              quantity: 1,
+              unitPrice: price,
+              totalPrice: price,
+              unit: "unidade",
+            })
+          }
+        }
       }
     }
-  }
 
-  return items
+    return items.slice(0, 5) // Limitar a 5 itens
+  } catch (error) {
+    console.error("Erro ao extrair itens:", error)
+    return []
+  }
 }
