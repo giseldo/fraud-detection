@@ -17,11 +17,13 @@ import {
   TrendingUp,
   TrendingDown,
   Minus,
+  File,
 } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import { Alert, AlertDescription } from "@/components/ui/alert"
 import { analyzeContract } from "./actions/analyze-contract"
 import SampleContract from "./components/sample-contract"
+import { extractTextFromPDF } from "./utils/pdf-extractor"
 
 interface SuspiciousPattern {
   pattern: string
@@ -53,7 +55,9 @@ export default function FraudDetectionApp() {
   const [contractText, setContractText] = useState("")
   const [analysis, setAnalysis] = useState<FraudAnalysis | null>(null)
   const [isAnalyzing, setIsAnalyzing] = useState(false)
+  const [isExtractingPDF, setIsExtractingPDF] = useState(false)
   const [error, setError] = useState("")
+  const [uploadedFileName, setUploadedFileName] = useState("")
 
   const handleAnalyze = async () => {
     if (!contractText.trim()) {
@@ -76,17 +80,34 @@ export default function FraudDetectionApp() {
     setIsAnalyzing(false)
   }
 
-  const handleFileUpload = (event: React.ChangeEvent<HTMLInputElement>) => {
+  const handleFileUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0]
-    if (file && file.type === "text/plain") {
-      const reader = new FileReader()
-      reader.onload = (e) => {
-        const text = e.target?.result as string
-        setContractText(text)
+    if (!file) return
+
+    setError("")
+    setUploadedFileName(file.name)
+
+    try {
+      if (file.type === "application/pdf") {
+        setIsExtractingPDF(true)
+        const extractedText = await extractTextFromPDF(file)
+        setContractText(extractedText)
+        setIsExtractingPDF(false)
+      } else if (file.type === "text/plain") {
+        const reader = new FileReader()
+        reader.onload = (e) => {
+          const text = e.target?.result as string
+          setContractText(text)
+        }
+        reader.readAsText(file)
+      } else {
+        setError("Por favor, selecione um arquivo PDF (.pdf) ou de texto (.txt)")
+        setUploadedFileName("")
       }
-      reader.readAsText(file)
-    } else {
-      setError("Por favor, selecione um arquivo de texto (.txt)")
+    } catch (error) {
+      setError(`Erro ao processar arquivo: ${error.message}`)
+      setIsExtractingPDF(false)
+      setUploadedFileName("")
     }
   }
 
@@ -141,7 +162,7 @@ export default function FraudDetectionApp() {
           <p className="text-gray-600">
             Analise contratos de licitação para identificar possíveis irregularidades e fraudes
           </p>
-          <p className="text-sm text-blue-600 mt-1">✨ Agora com análise de preços médios do PNCP</p>
+          <p className="text-sm text-blue-600 mt-1">✨ Suporte a PDF e análise de preços médios do PNCP</p>
         </div>
 
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
@@ -155,24 +176,48 @@ export default function FraudDetectionApp() {
                   <FileText className="w-5 h-5" />
                   Documento do Contrato
                 </CardTitle>
-                <CardDescription>Cole o texto do contrato ou faça upload de um arquivo</CardDescription>
+                <CardDescription>Cole o texto do contrato ou faça upload de um arquivo PDF/TXT</CardDescription>
               </CardHeader>
               <CardContent className="space-y-4">
                 <div>
                   <Label htmlFor="file-upload" className="block text-sm font-medium mb-2">
-                    Upload de Arquivo (opcional)
+                    Upload de Arquivo
                   </Label>
-                  <div className="flex items-center gap-2">
-                    <input id="file-upload" type="file" accept=".txt" onChange={handleFileUpload} className="hidden" />
-                    <Button
-                      variant="outline"
-                      onClick={() => document.getElementById("file-upload")?.click()}
-                      className="flex items-center gap-2"
-                    >
-                      <Upload className="w-4 h-4" />
-                      Selecionar Arquivo
-                    </Button>
-                    <span className="text-sm text-gray-500">Apenas arquivos .txt</span>
+                  <div className="space-y-3">
+                    <div className="flex items-center gap-2">
+                      <input
+                        id="file-upload"
+                        type="file"
+                        accept=".pdf,.txt"
+                        onChange={handleFileUpload}
+                        className="hidden"
+                        disabled={isExtractingPDF}
+                      />
+                      <Button
+                        variant="outline"
+                        onClick={() => document.getElementById("file-upload")?.click()}
+                        className="flex items-center gap-2"
+                        disabled={isExtractingPDF}
+                      >
+                        <Upload className="w-4 h-4" />
+                        {isExtractingPDF ? "Processando PDF..." : "Selecionar Arquivo"}
+                      </Button>
+                      <span className="text-sm text-gray-500">PDF ou TXT</span>
+                    </div>
+
+                    {uploadedFileName && (
+                      <div className="flex items-center gap-2 text-sm text-green-600">
+                        <File className="w-4 h-4" />
+                        <span>Arquivo carregado: {uploadedFileName}</span>
+                      </div>
+                    )}
+
+                    {isExtractingPDF && (
+                      <div className="flex items-center gap-2 text-sm text-blue-600">
+                        <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-blue-600"></div>
+                        <span>Extraindo texto do PDF...</span>
+                      </div>
+                    )}
                   </div>
                 </div>
 
@@ -180,10 +225,11 @@ export default function FraudDetectionApp() {
                   <Label htmlFor="contract-text">Texto do Contrato</Label>
                   <Textarea
                     id="contract-text"
-                    placeholder="Cole aqui o texto completo do contrato de licitação..."
+                    placeholder="Cole aqui o texto completo do contrato de licitação ou faça upload de um arquivo PDF..."
                     value={contractText}
                     onChange={(e) => setContractText(e.target.value)}
                     className="min-h-[300px] mt-2"
+                    disabled={isExtractingPDF}
                   />
                 </div>
 
@@ -194,7 +240,11 @@ export default function FraudDetectionApp() {
                   </Alert>
                 )}
 
-                <Button onClick={handleAnalyze} disabled={isAnalyzing || !contractText.trim()} className="w-full">
+                <Button
+                  onClick={handleAnalyze}
+                  disabled={isAnalyzing || isExtractingPDF || !contractText.trim()}
+                  className="w-full"
+                >
                   {isAnalyzing ? "Analisando..." : "Analisar Contrato"}
                 </Button>
               </CardContent>
@@ -215,6 +265,7 @@ export default function FraudDetectionApp() {
                 <div className="text-center py-12 text-gray-500">
                   <FileText className="w-12 h-12 mx-auto mb-4 opacity-50" />
                   <p>Insira um contrato para ver a análise de fraude</p>
+                  <p className="text-sm mt-2">Suporte a arquivos PDF e TXT</p>
                 </div>
               )}
 
@@ -245,7 +296,7 @@ export default function FraudDetectionApp() {
                     <div>
                       <h3 className="font-semibold mb-3 flex items-center gap-2">
                         <TrendingUp className="w-4 h-4" />
-                        Análise de Preços (PNCP)
+                        Análise de Preços vs PNCP ({analysis.priceAnalysis.length} itens)
                       </h3>
                       <div className="space-y-3">
                         {analysis.priceAnalysis.map((price, index) => (
@@ -259,23 +310,23 @@ export default function FraudDetectionApp() {
                                   <div className="grid grid-cols-2 gap-4 mt-2 text-sm">
                                     <div>
                                       <span className="text-gray-600">Preço Contrato:</span>
-                                      <div className="font-medium">{formatCurrency(price.contractPrice)}</div>
+                                      <div className="font-medium text-lg">{formatCurrency(price.contractPrice)}</div>
                                     </div>
                                     <div>
                                       <span className="text-gray-600">Preço Médio PNCP:</span>
-                                      <div className="font-medium">
+                                      <div className="font-medium text-lg">
                                         {price.marketPrice ? formatCurrency(price.marketPrice) : "N/A"}
                                       </div>
                                     </div>
                                   </div>
 
-                                  <div className="mt-2 flex items-center gap-2">
+                                  <div className="mt-3 flex items-center gap-2">
                                     <Badge className={getRiskColor(price.riskLevel)} variant="outline">
                                       {price.riskLevel}
                                     </Badge>
                                     {price.marketPrice && (
                                       <span
-                                        className={`text-sm font-medium ${
+                                        className={`text-sm font-bold ${
                                           price.priceVariation > 0 ? "text-red-600" : "text-green-600"
                                         }`}
                                       >
@@ -285,7 +336,9 @@ export default function FraudDetectionApp() {
                                     )}
                                   </div>
 
-                                  <p className="text-sm text-gray-600 mt-2">{price.analysis}</p>
+                                  <div className="mt-2 p-2 bg-blue-50 rounded text-sm">
+                                    <strong>Análise:</strong> {price.analysis}
+                                  </div>
                                 </div>
                               </div>
                             </CardContent>
