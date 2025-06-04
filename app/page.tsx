@@ -1,7 +1,6 @@
 "use client"
 
 import type React from "react"
-import dynamic from "next/dynamic"
 import { useState } from "react"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
@@ -18,16 +17,13 @@ import {
   TrendingDown,
   Minus,
   File,
+  Loader2,
 } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import { Alert, AlertDescription } from "@/components/ui/alert"
+import { Progress } from "@/components/ui/progress"
 import { analyzeContract } from "./actions/analyze-contract"
 import SampleContract from "./components/sample-contract"
-
-// Import dinâmico para evitar SSR
-const PDFExtractor = dynamic(() => import("./utils/pdf-extractor"), {
-  ssr: false,
-})
 
 interface SuspiciousPattern {
   pattern: string
@@ -60,8 +56,10 @@ export default function FraudDetectionApp() {
   const [analysis, setAnalysis] = useState<FraudAnalysis | null>(null)
   const [isAnalyzing, setIsAnalyzing] = useState(false)
   const [isExtractingPDF, setIsExtractingPDF] = useState(false)
+  const [extractionProgress, setExtractionProgress] = useState(0)
   const [error, setError] = useState("")
   const [uploadedFileName, setUploadedFileName] = useState("")
+  const [pdfInfo, setPdfInfo] = useState<{ numPages: number; fileSize: number } | null>(null)
 
   const handleAnalyze = async () => {
     if (!contractText.trim()) {
@@ -90,17 +88,47 @@ export default function FraudDetectionApp() {
 
     setError("")
     setUploadedFileName(file.name)
+    setPdfInfo(null)
+    setExtractionProgress(0)
 
     try {
       if (file.type === "application/pdf") {
         setIsExtractingPDF(true)
+        setExtractionProgress(10)
 
         // Import dinâmico do extrator de PDF
-        const { extractTextFromPDF } = await import("./utils/pdf-extractor")
+        const { extractTextFromPDF, getPDFInfo, validatePDFFile } = await import("./utils/pdf-extractor")
+
+        setExtractionProgress(20)
+
+        // Validar arquivo primeiro
+        if (!validatePDFFile(file)) {
+          throw new Error("Arquivo PDF inválido ou muito grande (máximo 50MB)")
+        }
+
+        setExtractionProgress(30)
+
+        // Obter informações do PDF
+        try {
+          const info = await getPDFInfo(file)
+          setPdfInfo(info)
+          setExtractionProgress(50)
+        } catch (infoError) {
+          console.warn("Não foi possível obter informações do PDF:", infoError)
+          setExtractionProgress(50)
+        }
+
+        // Extrair texto
         const extractedText = await extractTextFromPDF(file)
+        setExtractionProgress(90)
 
         setContractText(extractedText)
-        setIsExtractingPDF(false)
+        setExtractionProgress(100)
+
+        setTimeout(() => {
+          setIsExtractingPDF(false)
+          setExtractionProgress(0)
+        }, 500)
       } else if (file.type === "text/plain") {
         const reader = new FileReader()
         reader.onload = (e) => {
@@ -113,9 +141,12 @@ export default function FraudDetectionApp() {
         setUploadedFileName("")
       }
     } catch (error) {
-      setError(`Erro ao processar arquivo: ${error.message}`)
+      console.error("Erro no upload:", error)
+      setError(`${error.message}`)
       setIsExtractingPDF(false)
       setUploadedFileName("")
+      setPdfInfo(null)
+      setExtractionProgress(0)
     }
   }
 
@@ -160,6 +191,14 @@ export default function FraudDetectionApp() {
       style: "currency",
       currency: "BRL",
     }).format(value)
+  }
+
+  const formatFileSize = (bytes: number) => {
+    if (bytes === 0) return "0 Bytes"
+    const k = 1024
+    const sizes = ["Bytes", "KB", "MB", "GB"]
+    const i = Math.floor(Math.log(bytes) / Math.log(k))
+    return Number.parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + " " + sizes[i]
   }
 
   return (
@@ -207,23 +246,33 @@ export default function FraudDetectionApp() {
                         className="flex items-center gap-2"
                         disabled={isExtractingPDF}
                       >
-                        <Upload className="w-4 h-4" />
-                        {isExtractingPDF ? "Processando PDF..." : "Selecionar Arquivo"}
+                        {isExtractingPDF ? (
+                          <Loader2 className="w-4 h-4 animate-spin" />
+                        ) : (
+                          <Upload className="w-4 h-4" />
+                        )}
+                        {isExtractingPDF ? "Processando..." : "Selecionar Arquivo"}
                       </Button>
-                      <span className="text-sm text-gray-500">PDF ou TXT</span>
+                      <span className="text-sm text-gray-500">PDF ou TXT (máx. 50MB)</span>
                     </div>
 
-                    {uploadedFileName && (
+                    {uploadedFileName && !isExtractingPDF && (
                       <div className="flex items-center gap-2 text-sm text-green-600">
                         <File className="w-4 h-4" />
-                        <span>Arquivo carregado: {uploadedFileName}</span>
+                        <span>
+                          {uploadedFileName}
+                          {pdfInfo && ` (${pdfInfo.numPages} páginas, ${formatFileSize(pdfInfo.fileSize)})`}
+                        </span>
                       </div>
                     )}
 
                     {isExtractingPDF && (
-                      <div className="flex items-center gap-2 text-sm text-blue-600">
-                        <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-blue-600"></div>
-                        <span>Extraindo texto do PDF...</span>
+                      <div className="space-y-2">
+                        <div className="flex items-center gap-2 text-sm text-blue-600">
+                          <Loader2 className="w-4 h-4 animate-spin" />
+                          <span>Extraindo texto do PDF...</span>
+                        </div>
+                        <Progress value={extractionProgress} className="w-full" />
                       </div>
                     )}
                   </div>
@@ -253,13 +302,20 @@ export default function FraudDetectionApp() {
                   disabled={isAnalyzing || isExtractingPDF || !contractText.trim()}
                   className="w-full"
                 >
-                  {isAnalyzing ? "Analisando..." : "Analisar Contrato"}
+                  {isAnalyzing ? (
+                    <>
+                      <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                      Analisando...
+                    </>
+                  ) : (
+                    "Analisar Contrato"
+                  )}
                 </Button>
               </CardContent>
             </Card>
           </div>
 
-          {/* Results Section */}
+          {/* Results Section - mantém o mesmo código anterior */}
           <Card>
             <CardHeader>
               <CardTitle className="flex items-center gap-2">
@@ -279,7 +335,7 @@ export default function FraudDetectionApp() {
 
               {isAnalyzing && (
                 <div className="text-center py-12">
-                  <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto mb-4"></div>
+                  <Loader2 className="w-12 h-12 mx-auto mb-4 animate-spin text-blue-600" />
                   <p className="text-gray-600">Analisando contrato...</p>
                   <p className="text-sm text-gray-500 mt-2">Consultando preços médios do PNCP...</p>
                 </div>
