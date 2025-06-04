@@ -1,12 +1,31 @@
 "use client"
 
-import * as pdfjsLib from "pdfjs-dist"
+// Função para carregar PDF.js dinamicamente apenas no cliente
+async function loadPDFJS() {
+  if (typeof window === "undefined") {
+    throw new Error("PDF.js só pode ser usado no navegador")
+  }
 
-// Configurar o worker do PDF.js
-pdfjsLib.GlobalWorkerOptions.workerSrc = `//cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjsLib.version}/pdf.worker.min.js`
+  const pdfjsLib = await import("pdfjs-dist")
+
+  // Configurar o worker apenas se ainda não foi configurado
+  if (!pdfjsLib.GlobalWorkerOptions.workerSrc) {
+    pdfjsLib.GlobalWorkerOptions.workerSrc = `//cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjsLib.version}/pdf.worker.min.js`
+  }
+
+  return pdfjsLib
+}
 
 export async function extractTextFromPDF(file: File): Promise<string> {
   try {
+    // Verificar se estamos no navegador
+    if (typeof window === "undefined") {
+      throw new Error("Extração de PDF só funciona no navegador")
+    }
+
+    // Carregar PDF.js dinamicamente
+    const pdfjsLib = await loadPDFJS()
+
     // Converter arquivo para ArrayBuffer
     const arrayBuffer = await file.arrayBuffer()
 
@@ -57,6 +76,14 @@ export async function getPDFInfo(file: File): Promise<{
   subject?: string
 }> {
   try {
+    // Verificar se estamos no navegador
+    if (typeof window === "undefined") {
+      throw new Error("Informações de PDF só funcionam no navegador")
+    }
+
+    // Carregar PDF.js dinamicamente
+    const pdfjsLib = await loadPDFJS()
+
     const arrayBuffer = await file.arrayBuffer()
     const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise
 

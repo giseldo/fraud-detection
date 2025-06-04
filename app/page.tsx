@@ -1,7 +1,7 @@
 "use client"
 
 import type React from "react"
-
+import dynamic from "next/dynamic"
 import { useState } from "react"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
@@ -23,7 +23,11 @@ import { Badge } from "@/components/ui/badge"
 import { Alert, AlertDescription } from "@/components/ui/alert"
 import { analyzeContract } from "./actions/analyze-contract"
 import SampleContract from "./components/sample-contract"
-import { extractTextFromPDF } from "./utils/pdf-extractor"
+
+// Import dinâmico para evitar SSR
+const PDFExtractor = dynamic(() => import("./utils/pdf-extractor"), {
+  ssr: false,
+})
 
 interface SuspiciousPattern {
   pattern: string
@@ -90,7 +94,11 @@ export default function FraudDetectionApp() {
     try {
       if (file.type === "application/pdf") {
         setIsExtractingPDF(true)
+
+        // Import dinâmico do extrator de PDF
+        const { extractTextFromPDF } = await import("./utils/pdf-extractor")
         const extractedText = await extractTextFromPDF(file)
+
         setContractText(extractedText)
         setIsExtractingPDF(false)
       } else if (file.type === "text/plain") {
