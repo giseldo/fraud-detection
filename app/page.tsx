@@ -1,7 +1,7 @@
 "use client"
 
 import type React from "react"
-import { useState } from "react"
+import { useState, useEffect } from "react"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Textarea } from "@/components/ui/textarea"
@@ -18,6 +18,9 @@ import {
   Minus,
   File,
   Loader2,
+  Wifi,
+  WifiOff,
+  Info,
 } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import { Alert, AlertDescription } from "@/components/ui/alert"
@@ -60,6 +63,25 @@ export default function FraudDetectionApp() {
   const [error, setError] = useState("")
   const [uploadedFileName, setUploadedFileName] = useState("")
   const [pdfInfo, setPdfInfo] = useState<{ numPages: number; fileSize: number } | null>(null)
+  const [pdfSupported, setPdfSupported] = useState<boolean | null>(null) // null = testando
+
+  // Testar suporte a PDF na inicialização
+  useEffect(() => {
+    const testPDF = async () => {
+      try {
+        console.log("Testando suporte a PDF...")
+        const { testPDFJS } = await import("./utils/pdf-extractor")
+        const supported = await testPDFJS()
+        setPdfSupported(supported)
+        console.log("Suporte a PDF:", supported ? "Disponível" : "Indisponível")
+      } catch (error) {
+        console.warn("Erro ao testar PDF.js:", error)
+        setPdfSupported(false)
+      }
+    }
+
+    testPDF()
+  }, [])
 
   const handleAnalyze = async () => {
     if (!contractText.trim()) {
@@ -71,12 +93,17 @@ export default function FraudDetectionApp() {
     setError("")
     setAnalysis(null)
 
-    const result = await analyzeContract(contractText)
+    try {
+      const result = await analyzeContract(contractText)
 
-    if (result.success) {
-      setAnalysis(result.analysis)
-    } else {
-      setError(result.error || "Erro desconhecido")
+      if (result.success) {
+        setAnalysis(result.analysis)
+      } else {
+        setError(result.error || "Erro desconhecido na análise")
+      }
+    } catch (analyzeError) {
+      console.error("Erro na análise:", analyzeError)
+      setError("Erro interno na análise. Tente novamente.")
     }
 
     setIsAnalyzing(false)
@@ -86,6 +113,9 @@ export default function FraudDetectionApp() {
     const file = event.target.files?.[0]
     if (!file) return
 
+    console.log("=== Iniciando upload ===")
+    console.log("Arquivo:", file.name, "Tipo:", file.type, "Tamanho:", file.size)
+
     setError("")
     setUploadedFileName(file.name)
     setPdfInfo(null)
@@ -93,60 +123,107 @@ export default function FraudDetectionApp() {
 
     try {
       if (file.type === "application/pdf") {
-        setIsExtractingPDF(true)
-        setExtractionProgress(10)
-
-        // Import dinâmico do extrator de PDF
-        const { extractTextFromPDF, getPDFInfo, validatePDFFile } = await import("./utils/pdf-extractor")
-
-        setExtractionProgress(20)
-
-        // Validar arquivo primeiro
-        if (!validatePDFFile(file)) {
-          throw new Error("Arquivo PDF inválido ou muito grande (máximo 50MB)")
+        // Verificar se PDF é suportado
+        if (pdfSupported === false) {
+          throw new Error("Suporte a PDF não está disponível. Use um arquivo de texto (.txt)")
         }
 
-        setExtractionProgress(30)
+        if (pdfSupported === null) {
+          throw new Error("Ainda verificando suporte a PDF. Aguarde um momento e tente novamente")
+        }
 
-        // Obter informações do PDF
+        setIsExtractingPDF(true)
+        setExtractionProgress(5)
+
+        // Import dinâmico com tratamento de erro
+        let pdfUtils
         try {
-          const info = await getPDFInfo(file)
+          pdfUtils = await import("./utils/pdf-extractor")
+          setExtractionProgress(15)
+        } catch (importError) {
+          console.error("Erro ao importar PDF utils:", importError)
+          throw new Error("Erro ao carregar processador de PDF")
+        }
+
+        // Validar arquivo
+        setExtractionProgress(25)
+        if (!pdfUtils.validatePDFFile(file)) {
+          throw new Error("Arquivo PDF inválido ou muito grande (máximo 20MB)")
+        }
+
+        // Obter informações do PDF (opcional)
+        setExtractionProgress(35)
+        try {
+          const info = await pdfUtils.getPDFInfo(file)
           setPdfInfo(info)
-          setExtractionProgress(50)
+          console.log("Info do PDF:", info)
         } catch (infoError) {
           console.warn("Não foi possível obter informações do PDF:", infoError)
-          setExtractionProgress(50)
+          // Continuar mesmo sem as informações
         }
 
         // Extrair texto
-        const extractedText = await extractTextFromPDF(file)
+        setExtractionProgress(50)
+        console.log("Iniciando extração de texto...")
+
+        const extractedText = await pdfUtils.extractTextFromPDF(file)
+
         setExtractionProgress(90)
+        console.log("Texto extraído com sucesso, tamanho:", extractedText.length)
+
+        if (!extractedText.trim()) {
+          throw new Error("Nenhum texto foi extraído do PDF")
+        }
 
         setContractText(extractedText)
         setExtractionProgress(100)
 
+        // Limpar progresso após um tempo
         setTimeout(() => {
           setIsExtractingPDF(false)
           setExtractionProgress(0)
-        }, 500)
+        }, 1000)
       } else if (file.type === "text/plain") {
+        console.log("Processando arquivo de texto...")
+
         const reader = new FileReader()
         reader.onload = (e) => {
           const text = e.target?.result as string
-          setContractText(text)
+          if (text && text.trim()) {
+            setContractText(text)
+            console.log("Arquivo de texto carregado, tamanho:", text.length)
+          } else {
+            setError("Arquivo de texto está vazio")
+          }
+        }
+        reader.onerror = () => {
+          setError("Erro ao ler arquivo de texto")
         }
         reader.readAsText(file)
       } else {
-        setError("Por favor, selecione um arquivo PDF (.pdf) ou de texto (.txt)")
-        setUploadedFileName("")
+        throw new Error("Tipo de arquivo não suportado. Use PDF (.pdf) ou texto (.txt)")
       }
     } catch (error) {
-      console.error("Erro no upload:", error)
-      setError(`${error.message}`)
+      console.error("=== Erro no upload ===", error)
+
+      // Limpar estado em caso de erro
       setIsExtractingPDF(false)
       setUploadedFileName("")
       setPdfInfo(null)
       setExtractionProgress(0)
+
+      // Mostrar erro específico com sugestões
+      let errorMessage = error.message || "Erro desconhecido no upload"
+
+      if (errorMessage.includes("versão") || errorMessage.includes("version")) {
+        errorMessage += "\n\n💡 Sugestão: Converta o PDF para texto (.txt) usando um conversor online"
+      }
+
+      if (errorMessage.includes("muito grande")) {
+        errorMessage += "\n\n💡 Sugestão: Reduza o tamanho do arquivo ou use apenas as páginas principais"
+      }
+
+      setError(errorMessage)
     }
   }
 
@@ -201,6 +278,24 @@ export default function FraudDetectionApp() {
     return Number.parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + " " + sizes[i]
   }
 
+  const getPDFStatusIcon = () => {
+    if (pdfSupported === null) return <Loader2 className="w-3 h-3 animate-spin" />
+    if (pdfSupported === true) return <Wifi className="w-3 h-3" />
+    return <WifiOff className="w-3 h-3" />
+  }
+
+  const getPDFStatusText = () => {
+    if (pdfSupported === null) return "Verificando..."
+    if (pdfSupported === true) return "PDF suportado"
+    return "Apenas TXT"
+  }
+
+  const getPDFStatusColor = () => {
+    if (pdfSupported === null) return "text-blue-600"
+    if (pdfSupported === true) return "text-green-600"
+    return "text-orange-600"
+  }
+
   return (
     <div className="min-h-screen bg-gray-50 py-8">
       <div className="max-w-6xl mx-auto px-4">
@@ -209,7 +304,13 @@ export default function FraudDetectionApp() {
           <p className="text-gray-600">
             Analise contratos de licitação para identificar possíveis irregularidades e fraudes
           </p>
-          <p className="text-sm text-blue-600 mt-1">✨ Suporte a PDF e análise de preços médios do PNCP</p>
+          <div className="flex items-center justify-center gap-4 mt-2">
+            <span className="text-sm text-blue-600">✨ Análise de preços médios do PNCP</span>
+            <div className={`flex items-center gap-1 text-sm ${getPDFStatusColor()}`}>
+              {getPDFStatusIcon()}
+              <span>{getPDFStatusText()}</span>
+            </div>
+          </div>
         </div>
 
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
@@ -223,9 +324,29 @@ export default function FraudDetectionApp() {
                   <FileText className="w-5 h-5" />
                   Documento do Contrato
                 </CardTitle>
-                <CardDescription>Cole o texto do contrato ou faça upload de um arquivo PDF/TXT</CardDescription>
+                <CardDescription>
+                  Cole o texto do contrato ou faça upload de um arquivo {pdfSupported === true ? "PDF/TXT" : "TXT"}
+                  {pdfSupported === true && (
+                    <div className="text-xs text-gray-500 mt-1">
+                      💡 Se houver problemas com PDF, converta para TXT usando um conversor online
+                    </div>
+                  )}
+                </CardDescription>
               </CardHeader>
               <CardContent className="space-y-4">
+                {pdfSupported === false && (
+                  <Alert>
+                    <Info className="h-4 w-4" />
+                    <AlertDescription>
+                      Suporte a PDF não está disponível. Use arquivos de texto (.txt) ou cole o texto diretamente.
+                      <br />
+                      <span className="text-xs text-gray-500">
+                        Isso pode acontecer devido a limitações de rede ou configuração do navegador.
+                      </span>
+                    </AlertDescription>
+                  </Alert>
+                )}
+
                 <div>
                   <Label htmlFor="file-upload" className="block text-sm font-medium mb-2">
                     Upload de Arquivo
@@ -235,16 +356,16 @@ export default function FraudDetectionApp() {
                       <input
                         id="file-upload"
                         type="file"
-                        accept=".pdf,.txt"
+                        accept={pdfSupported === true ? ".pdf,.txt" : ".txt"}
                         onChange={handleFileUpload}
                         className="hidden"
-                        disabled={isExtractingPDF}
+                        disabled={isExtractingPDF || pdfSupported === null}
                       />
                       <Button
                         variant="outline"
                         onClick={() => document.getElementById("file-upload")?.click()}
                         className="flex items-center gap-2"
-                        disabled={isExtractingPDF}
+                        disabled={isExtractingPDF || pdfSupported === null}
                       >
                         {isExtractingPDF ? (
                           <Loader2 className="w-4 h-4 animate-spin" />
@@ -253,7 +374,13 @@ export default function FraudDetectionApp() {
                         )}
                         {isExtractingPDF ? "Processando..." : "Selecionar Arquivo"}
                       </Button>
-                      <span className="text-sm text-gray-500">PDF ou TXT (máx. 50MB)</span>
+                      <span className="text-sm text-gray-500">
+                        {pdfSupported === true
+                          ? "PDF ou TXT (máx. 15MB)"
+                          : pdfSupported === false
+                            ? "Apenas TXT"
+                            : "Verificando..."}
+                      </span>
                     </div>
 
                     {uploadedFileName && !isExtractingPDF && (
@@ -261,7 +388,9 @@ export default function FraudDetectionApp() {
                         <File className="w-4 h-4" />
                         <span>
                           {uploadedFileName}
-                          {pdfInfo && ` (${pdfInfo.numPages} páginas, ${formatFileSize(pdfInfo.fileSize)})`}
+                          {pdfInfo &&
+                            pdfInfo.numPages > 0 &&
+                            ` (${pdfInfo.numPages} páginas, ${formatFileSize(pdfInfo.fileSize)})`}
                         </span>
                       </div>
                     )}
@@ -273,6 +402,12 @@ export default function FraudDetectionApp() {
                           <span>Extraindo texto do PDF...</span>
                         </div>
                         <Progress value={extractionProgress} className="w-full" />
+                        <div className="text-xs text-gray-500">
+                          {extractionProgress < 25 && "Carregando processador..."}
+                          {extractionProgress >= 25 && extractionProgress < 50 && "Validando arquivo..."}
+                          {extractionProgress >= 50 && extractionProgress < 90 && "Extraindo texto..."}
+                          {extractionProgress >= 90 && "Finalizando..."}
+                        </div>
                       </div>
                     )}
                   </div>
@@ -282,12 +417,15 @@ export default function FraudDetectionApp() {
                   <Label htmlFor="contract-text">Texto do Contrato</Label>
                   <Textarea
                     id="contract-text"
-                    placeholder="Cole aqui o texto completo do contrato de licitação ou faça upload de um arquivo PDF..."
+                    placeholder="Cole aqui o texto completo do contrato de licitação ou faça upload de um arquivo..."
                     value={contractText}
                     onChange={(e) => setContractText(e.target.value)}
                     className="min-h-[300px] mt-2"
                     disabled={isExtractingPDF}
                   />
+                  {contractText.length > 0 && (
+                    <div className="text-xs text-gray-500 mt-1">{contractText.length} caracteres</div>
+                  )}
                 </div>
 
                 {error && (
@@ -329,7 +467,10 @@ export default function FraudDetectionApp() {
                 <div className="text-center py-12 text-gray-500">
                   <FileText className="w-12 h-12 mx-auto mb-4 opacity-50" />
                   <p>Insira um contrato para ver a análise de fraude</p>
-                  <p className="text-sm mt-2">Suporte a arquivos PDF e TXT</p>
+                  <p className="text-sm mt-2">
+                    Suporte a arquivos{" "}
+                    {pdfSupported === true ? "PDF e TXT" : pdfSupported === false ? "TXT" : "verificando..."}
+                  </p>
                 </div>
               )}
 

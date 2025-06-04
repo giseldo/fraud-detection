@@ -1,182 +1,273 @@
 "use client"
 
-// Função para carregar PDF.js dinamicamente com fallbacks
+// Função para carregar PDF.js com versão compatível
 async function loadPDFJS() {
   if (typeof window === "undefined") {
     throw new Error("PDF.js só pode ser usado no navegador")
   }
 
   try {
+    // Carregar PDF.js
     const pdfjsLib = await import("pdfjs-dist")
+    console.log("PDF.js carregado, versão:", pdfjsLib.version)
 
-    // Tentar configurar o worker com múltiplos fallbacks
+    // Configurar worker com versão compatível
     if (!pdfjsLib.GlobalWorkerOptions.workerSrc) {
-      const workerUrls = [
-        // Fallback 1: jsDelivr CDN
-        `https://cdn.jsdelivr.net/npm/pdfjs-dist@${pdfjsLib.version}/build/pdf.worker.min.js`,
-        // Fallback 2: unpkg CDN
-        `https://unpkg.com/pdfjs-dist@${pdfjsLib.version}/build/pdf.worker.min.js`,
-        // Fallback 3: cdnjs (original)
-        `https://cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjsLib.version}/pdf.worker.min.js`,
-      ]
+      try {
+        // Usar a mesma versão da biblioteca carregada
+        const version = pdfjsLib.version || "latest"
 
-      // Tentar cada URL até uma funcionar
-      for (const workerUrl of workerUrls) {
-        try {
-          // Testar se a URL está acessível
-          const response = await fetch(workerUrl, { method: "HEAD" })
-          if (response.ok) {
-            pdfjsLib.GlobalWorkerOptions.workerSrc = workerUrl
-            console.log(`PDF.js worker carregado de: ${workerUrl}`)
-            break
+        // Lista de CDNs para tentar, usando a versão correta
+        const workerUrls = [
+          `https://cdn.jsdelivr.net/npm/pdfjs-dist@${version}/build/pdf.worker.min.js`,
+          `https://unpkg.com/pdfjs-dist@${version}/build/pdf.worker.min.js`,
+          // Fallback para latest se a versão específica não funcionar
+          `https://cdn.jsdelivr.net/npm/pdfjs-dist@latest/build/pdf.worker.min.js`,
+          `https://unpkg.com/pdfjs-dist@latest/build/pdf.worker.min.js`,
+        ]
+
+        let workerLoaded = false
+
+        for (const workerUrl of workerUrls) {
+          try {
+            console.log(`Tentando worker: ${workerUrl}`)
+
+            // Testar se a URL está acessível
+            const controller = new AbortController()
+            const timeoutId = setTimeout(() => controller.abort(), 3000) // 3s timeout
+
+            const response = await fetch(workerUrl, {
+              method: "HEAD",
+              signal: controller.signal,
+            })
+
+            clearTimeout(timeoutId)
+
+            if (response.ok) {
+              pdfjsLib.GlobalWorkerOptions.workerSrc = workerUrl
+              console.log(`Worker configurado: ${workerUrl}`)
+              workerLoaded = true
+              break
+            }
+          } catch (error) {
+            console.warn(`Falha no worker ${workerUrl}:`, error)
+            continue
           }
-        } catch (error) {
-          console.warn(`Falha ao carregar worker de ${workerUrl}:`, error)
-          continue
         }
-      }
 
-      // Se nenhum CDN funcionou, usar worker inline como último recurso
-      if (!pdfjsLib.GlobalWorkerOptions.workerSrc) {
-        console.warn("Usando worker inline como fallback")
-        pdfjsLib.GlobalWorkerOptions.workerSrc = createInlineWorker()
+        // Se nenhum worker funcionou, tentar modo sem worker
+        if (!workerLoaded) {
+          console.warn("Nenhum worker disponível, tentando modo sem worker")
+          // Não definir workerSrc para usar modo sem worker
+          pdfjsLib.GlobalWorkerOptions.workerSrc = ""
+        }
+      } catch (workerError) {
+        console.warn("Erro ao configurar worker:", workerError)
+        // Usar modo sem worker
+        pdfjsLib.GlobalWorkerOptions.workerSrc = ""
       }
     }
 
     return pdfjsLib
   } catch (error) {
     console.error("Erro ao carregar PDF.js:", error)
-    throw new Error("Não foi possível carregar o processador de PDF")
+    throw new Error("PDF.js não está disponível")
   }
-}
-
-// Criar worker inline como fallback
-function createInlineWorker(): string {
-  const workerCode = `
-    // Worker inline simplificado para PDF.js
-    importScripts('https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.worker.min.js');
-  `
-
-  const blob = new Blob([workerCode], { type: "application/javascript" })
-  return URL.createObjectURL(blob)
 }
 
 export async function extractTextFromPDF(file: File): Promise<string> {
   try {
-    // Verificar se estamos no navegador
-    if (typeof window === "undefined") {
-      throw new Error("Extração de PDF só funciona no navegador")
-    }
+    console.log("=== Iniciando extração de PDF ===")
+    console.log("Arquivo:", file.name, "Tamanho:", file.size)
 
-    // Validar arquivo
+    // Validações básicas
     if (!file || file.type !== "application/pdf") {
       throw new Error("Arquivo deve ser um PDF válido")
     }
 
-    if (file.size > 50 * 1024 * 1024) {
-      // Limite de 50MB
-      throw new Error("Arquivo PDF muito grande. Limite: 50MB")
+    if (file.size > 15 * 1024 * 1024) {
+      // Reduzir ainda mais o limite para 15MB
+      throw new Error("Arquivo PDF muito grande. Limite: 15MB")
     }
 
-    console.log("Iniciando extração de PDF:", file.name)
+    if (file.size === 0) {
+      throw new Error("Arquivo PDF está vazio")
+    }
 
-    // Carregar PDF.js dinamicamente
-    const pdfjsLib = await loadPDFJS()
+    // Carregar PDF.js
+    let pdfjsLib
+    try {
+      pdfjsLib = await loadPDFJS()
+      console.log("PDF.js carregado com sucesso")
+    } catch (loadError) {
+      console.error("Erro ao carregar PDF.js:", loadError)
+      throw new Error("Processador de PDF não disponível. Use um arquivo de texto (.txt)")
+    }
 
     // Converter arquivo para ArrayBuffer
-    const arrayBuffer = await file.arrayBuffer()
+    let arrayBuffer
+    try {
+      arrayBuffer = await file.arrayBuffer()
+      console.log("Arquivo convertido para ArrayBuffer")
+    } catch (bufferError) {
+      console.error("Erro ao ler arquivo:", bufferError)
+      throw new Error("Erro ao ler o arquivo PDF")
+    }
 
-    console.log("Carregando documento PDF...")
+    // Carregar documento PDF com configurações ultra-simples
+    let pdf
+    try {
+      console.log("Carregando documento PDF...")
 
-    // Carregar o documento PDF com configurações otimizadas
-    const loadingTask = pdfjsLib.getDocument({
-      data: arrayBuffer,
-      cMapUrl: "https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/cmaps/",
-      cMapPacked: true,
-      standardFontDataUrl: "https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/standard_fonts/",
-    })
+      // Configurações mínimas para evitar problemas de compatibilidade
+      const loadingTask = pdfjsLib.getDocument({
+        data: arrayBuffer,
+        // Configurações mínimas
+        verbosity: 0,
+        // Não especificar outras configurações que podem causar problemas
+      })
 
-    const pdf = await loadingTask.promise
+      // Timeout mais generoso
+      const timeoutPromise = new Promise((_, reject) => {
+        setTimeout(() => reject(new Error("Timeout ao carregar PDF (45s)")), 45000)
+      })
 
-    console.log(`PDF carregado com ${pdf.numPages} páginas`)
+      pdf = await Promise.race([loadingTask.promise, timeoutPromise])
+      console.log(`PDF carregado: ${pdf.numPages} páginas`)
+    } catch (pdfError) {
+      console.error("Erro ao carregar PDF:", pdfError)
 
+      // Tratar erros específicos
+      if (pdfError.message.includes("API version") && pdfError.message.includes("Worker version")) {
+        throw new Error("Incompatibilidade de versão do processador PDF. Tente converter o arquivo para texto (.txt)")
+      }
+      if (pdfError.message.includes("Invalid PDF")) {
+        throw new Error("Arquivo PDF inválido ou corrompido")
+      }
+      if (pdfError.message.includes("Password")) {
+        throw new Error("PDF protegido por senha não é suportado")
+      }
+      if (pdfError.message.includes("Timeout")) {
+        throw new Error("PDF muito complexo. Tente um arquivo menor")
+      }
+
+      throw new Error("Erro ao processar PDF. Tente converter para texto (.txt)")
+    }
+
+    // Extrair texto das páginas
     let fullText = ""
-    const maxPages = Math.min(pdf.numPages, 50) // Limitar a 50 páginas para performance
+    const maxPages = Math.min(pdf.numPages, 8) // Reduzir para 8 páginas
 
-    // Extrair texto de cada página
+    console.log(`Processando ${maxPages} páginas...`)
+
     for (let pageNum = 1; pageNum <= maxPages; pageNum++) {
       try {
-        console.log(`Processando página ${pageNum}/${maxPages}`)
+        console.log(`Processando página ${pageNum}`)
 
         const page = await pdf.getPage(pageNum)
-        const textContent = await page.getTextContent()
 
-        // Combinar todos os itens de texto da página
+        // Timeout por página mais generoso
+        const pageTimeoutPromise = new Promise((_, reject) => {
+          setTimeout(() => reject(new Error("Timeout na página")), 15000) // 15s por página
+        })
+
+        // Configurações mínimas para extração de texto
+        const textContent = await Promise.race([
+          page.getTextContent({
+            // Configurações mínimas
+            normalizeWhitespace: true,
+          }),
+          pageTimeoutPromise,
+        ])
+
+        // Extrair texto simples
         const pageText = textContent.items
-          .map((item: any) => {
-            if ("str" in item && item.str.trim()) {
-              return item.str.trim()
-            }
-            return ""
-          })
-          .filter((text) => text.length > 0)
+          .filter((item: any) => item.str && typeof item.str === "string")
+          .map((item: any) => item.str.trim())
+          .filter((text: string) => text.length > 0)
           .join(" ")
 
         if (pageText.trim()) {
           fullText += `\n--- Página ${pageNum} ---\n${pageText}\n`
         }
 
-        // Cleanup da página para liberar memória
-        page.cleanup()
+        // Limpar página da memória
+        try {
+          page.cleanup()
+        } catch (cleanupError) {
+          console.warn("Erro ao limpar página:", cleanupError)
+        }
       } catch (pageError) {
-        console.warn(`Erro ao processar página ${pageNum}:`, pageError)
-        fullText += `\n--- Página ${pageNum} (erro ao processar) ---\n`
+        console.warn(`Erro na página ${pageNum}:`, pageError)
+        fullText += `\n--- Página ${pageNum} (erro) ---\n`
       }
     }
 
-    if (pdf.numPages > maxPages) {
-      fullText += `\n--- Nota: Apenas as primeiras ${maxPages} páginas foram processadas ---\n`
+    // Limpar documento
+    try {
+      pdf.destroy()
+    } catch (cleanupError) {
+      console.warn("Erro ao limpar PDF:", cleanupError)
     }
 
-    // Cleanup do documento
-    pdf.destroy()
-
+    // Verificar se extraiu algum texto
     if (!fullText.trim()) {
-      throw new Error(
-        "Não foi possível extrair texto do PDF. O arquivo pode estar protegido, ser uma imagem escaneada ou estar corrompido.",
-      )
+      throw new Error("Não foi possível extrair texto. O PDF pode ser uma imagem escaneada ou estar protegido")
     }
 
-    console.log("Extração de PDF concluída com sucesso")
+    if (pdf.numPages > maxPages) {
+      fullText += `\n--- Processadas apenas ${maxPages} de ${pdf.numPages} páginas ---\n`
+    }
+
+    console.log("=== Extração concluída com sucesso ===")
     return fullText.trim()
   } catch (error) {
-    console.error("Erro ao extrair texto do PDF:", error)
+    console.error("=== Erro na extração de PDF ===", error)
 
-    // Mensagens de erro mais específicas
-    if (error.message.includes("Invalid PDF")) {
-      throw new Error("Arquivo PDF inválido ou corrompido")
-    }
-    if (error.message.includes("Password")) {
-      throw new Error("PDF protegido por senha não é suportado")
-    }
-    if (error.message.includes("worker")) {
-      throw new Error("Erro ao carregar processador de PDF. Tente novamente ou use um arquivo de texto.")
+    // Retornar erro mais específico
+    if (error.message.includes("API version") || error.message.includes("Worker version")) {
+      throw new Error("Incompatibilidade de versão do PDF. Converta o arquivo para texto (.txt)")
     }
 
-    throw new Error(`Erro ao processar PDF: ${error.message}`)
+    if (error.message.includes("PDF.js não está disponível")) {
+      throw new Error("Processador de PDF não disponível. Use arquivo de texto (.txt)")
+    }
+
+    if (error.message.includes("muito grande")) {
+      throw new Error("Arquivo muito grande. Use arquivo menor que 15MB ou converta para texto")
+    }
+
+    if (error.message.includes("protegido") || error.message.includes("Password")) {
+      throw new Error("PDF protegido por senha. Remova a proteção ou use arquivo de texto")
+    }
+
+    if (error.message.includes("corrompido") || error.message.includes("Invalid")) {
+      throw new Error("Arquivo PDF corrompido. Tente outro arquivo ou use texto")
+    }
+
+    if (error.message.includes("imagem escaneada")) {
+      throw new Error("PDF parece ser imagem escaneada. Use OCR ou converta para texto")
+    }
+
+    // Erro genérico mais amigável
+    throw new Error("Erro ao processar PDF. Recomendamos converter para arquivo de texto (.txt)")
   }
 }
 
-// Função auxiliar para validar se o arquivo é um PDF válido
+// Função simplificada para validar PDF
 export function validatePDFFile(file: File): boolean {
-  if (!file) return false
-  if (file.type !== "application/pdf") return false
-  if (file.size === 0) return false
-  if (file.size > 50 * 1024 * 1024) return false // 50MB limit
-  return true
+  try {
+    if (!file) return false
+    if (file.type !== "application/pdf") return false
+    if (file.size === 0) return false
+    if (file.size > 15 * 1024 * 1024) return false // 15MB
+    return true
+  } catch {
+    return false
+  }
 }
 
-// Função simplificada para obter informações básicas do PDF
+// Função simplificada para info do PDF
 export async function getPDFInfo(file: File): Promise<{
   numPages: number
   fileSize: number
@@ -189,7 +280,12 @@ export async function getPDFInfo(file: File): Promise<{
 
     const pdfjsLib = await loadPDFJS()
     const arrayBuffer = await file.arrayBuffer()
-    const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise
+
+    // Configurações mínimas
+    const pdf = await pdfjsLib.getDocument({
+      data: arrayBuffer,
+      verbosity: 0,
+    }).promise
 
     const info = {
       numPages: pdf.numPages,
@@ -200,7 +296,43 @@ export async function getPDFInfo(file: File): Promise<{
     pdf.destroy()
     return info
   } catch (error) {
-    console.error("Erro ao obter informações do PDF:", error)
-    throw error
+    console.warn("Erro ao obter info do PDF:", error)
+    // Retornar info básica mesmo com erro
+    return {
+      numPages: 0,
+      fileSize: file.size,
+      fileName: file.name,
+    }
+  }
+}
+
+// Função para testar disponibilidade do PDF.js
+export async function testPDFJS(): Promise<boolean> {
+  try {
+    const pdfjsLib = await loadPDFJS()
+
+    // Testar se consegue criar um documento simples
+    const testPDF = new Uint8Array([
+      0x25,
+      0x50,
+      0x44,
+      0x46,
+      0x2d,
+      0x31,
+      0x2e,
+      0x34, // %PDF-1.4
+    ])
+
+    try {
+      const doc = await pdfjsLib.getDocument({ data: testPDF }).promise
+      doc.destroy()
+      return true
+    } catch (testError) {
+      console.warn("Teste de PDF falhou:", testError)
+      return false
+    }
+  } catch (error) {
+    console.warn("PDF.js não disponível:", error)
+    return false
   }
 }
